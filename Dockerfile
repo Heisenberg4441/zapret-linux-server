@@ -10,7 +10,9 @@ RUN apt-get update \
 
 WORKDIR /src
 COPY zapret/nfq /src/nfq
-RUN make -C /src/nfq
+RUN test -f /src/nfq/Makefile \
+    && test -f /src/nfq/nfqws.c \
+    && make -C /src/nfq
 
 FROM debian:bookworm-slim
 
