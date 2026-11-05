@@ -3,6 +3,7 @@ FROM debian:bookworm-slim AS build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        libcap-dev \
         libmnl-dev \
         libnetfilter-queue-dev \
         zlib1g-dev \

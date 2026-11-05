@@ -9,10 +9,13 @@ RUNTIME=/run/zls
 CHAIN=ZLS_NFQWS
 NFQWS_PID=
 SQUID_PID=
+LOG_PID=
 IPV4_READY=0
 IPV6_READY=0
 
 mkdir -p "$RUNTIME"
+touch "$RUNTIME/squid-access.log" "$RUNTIME/squid-cache.log"
+chown zapret:zapret "$RUNTIME/squid-access.log" "$RUNTIME/squid-cache.log"
 python3 /opt/zls/zlsctl.py render --output-dir "$RUNTIME"
 # shellcheck disable=SC1091
 source "$RUNTIME/firewall.env"
@@ -25,6 +28,9 @@ cleanup() {
     fi
     if [[ -n "$NFQWS_PID" ]]; then
         kill "$NFQWS_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$LOG_PID" ]]; then
+        kill "$LOG_PID" 2>/dev/null || true
     fi
     if [[ "$IPV4_READY" == 1 ]]; then
         iptables --wait 5 -t mangle -D OUTPUT -j "$CHAIN" 2>/dev/null || true
@@ -47,17 +53,19 @@ squid -k parse -f "$RUNTIME/squid.conf"
 
 queue_rules() {
     local tool=$1
+    local tcp_ports=${NFQWS_PORTS_TCP//-/:}
+    local udp_ports=${NFQWS_PORTS_UDP//-/:}
     "$tool" --wait 5 -t mangle -N "$CHAIN" 2>/dev/null || true
     "$tool" --wait 5 -t mangle -F "$CHAIN"
     "$tool" --wait 5 -t mangle -A "$CHAIN" -m owner ! --uid-owner "$ZLS_UID" -j RETURN
     "$tool" --wait 5 -t mangle -A "$CHAIN" -m mark --mark "$NFQWS_MARK/$NFQWS_MARK" -j RETURN
     if [[ -n "$NFQWS_PORTS_TCP" ]]; then
-        "$tool" --wait 5 -t mangle -A "$CHAIN" -p tcp -m multiport --dports "$NFQWS_PORTS_TCP" \
+        "$tool" --wait 5 -t mangle -A "$CHAIN" -p tcp -m multiport --dports "$tcp_ports" \
             -m connbytes --connbytes-dir=original --connbytes-mode=packets \
             --connbytes "1:$NFQWS_PKT_OUT" -j NFQUEUE --queue-num "$NFQWS_QNUM" --queue-bypass
     fi
     if [[ -n "$NFQWS_PORTS_UDP" ]]; then
-        "$tool" --wait 5 -t mangle -A "$CHAIN" -p udp -m multiport --dports "$NFQWS_PORTS_UDP" \
+        "$tool" --wait 5 -t mangle -A "$CHAIN" -p udp -m multiport --dports "$udp_ports" \
             -m connbytes --connbytes-dir=original --connbytes-mode=packets \
             --connbytes "1:$NFQWS_PKT_OUT" -j NFQUEUE --queue-num "$NFQWS_QNUM" --queue-bypass
     fi
@@ -77,6 +85,8 @@ printf 'Запуск nfqws (UID %s, queue %s)\n' "$ZLS_UID" "$NFQWS_QNUM"
 /opt/zapret/nfqws "${NFQWS_ARGS[@]}" &
 NFQWS_PID=$!
 printf 'Запуск HTTP-прокси на %s:%s\n' "${PROXY_BIND_ADDR:-0.0.0.0}" "${PROXY_PORT:-3128}"
+tail -n 0 -F "$RUNTIME/squid-access.log" "$RUNTIME/squid-cache.log" &
+LOG_PID=$!
 squid -N -d1 -f "$RUNTIME/squid.conf" &
 SQUID_PID=$!
 

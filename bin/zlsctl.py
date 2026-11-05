@@ -281,8 +281,6 @@ http_port {listen}:{port}
 acl SSL_ports port 443 1024-65535
 acl Safe_ports port 80 443 1024-65535
 acl CONNECT method CONNECT
-acl manager proto cache_object
-acl localhost src 127.0.0.1/32 ::1
 {acls}
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
@@ -293,21 +291,16 @@ http_access allow localnet
 http_access deny all
 cache deny all
 cache_mem 32 MB
-access_log stdio:/dev/stdout
-cache_log /dev/stderr
+access_log stdio:{output_dir}/squid-access.log
+cache_log {output_dir}/squid-cache.log
 cache_store_log none
 pid_filename {output_dir}/squid.pid
 cache_effective_user zapret
 cache_effective_group zapret
 forwarded_for delete
-via off
 httpd_suppress_version_string on
 shutdown_lifetime 3 seconds
 """
-    if not boolean_env("DISABLE_IPV6", "1"):
-        config += "dns_v4_first off\n"
-    else:
-        config += "dns_v4_first on\n"
     (output_dir / "squid.conf").write_text(config, encoding="utf-8")
 
 
