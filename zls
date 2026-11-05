@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+COMPOSE=(docker compose --project-directory "$ROOT" -f "$ROOT/compose.yaml")
+
+fail() {
+    printf 'Ошибка: %s\n' "$*" >&2
+    exit 1
+}
+
+need_docker() {
+    command -v docker >/dev/null 2>&1 || fail "Docker не найден."
+    docker info >/dev/null 2>&1 || fail "Docker daemon недоступен или у текущего пользователя нет прав."
+    docker compose version >/dev/null 2>&1 || fail "Плагин Docker Compose не найден."
+}
+
+ensure_image() {
+    if ! docker image inspect zapret-linux-server:latest >/dev/null 2>&1; then
+        "${COMPOSE[@]}" build
+    fi
+}
+
+run_ctl() {
+    ensure_image
+    "${COMPOSE[@]}" run --rm --no-deps --entrypoint python3 proxy /opt/zls/zlsctl.py "$@"
+}
+
+has_selection() {
+    [[ -f "$ROOT/config/selection.json" ]]
+}
+
+usage() {
+    cat <<'EOF'
+Использование: ./zls <команда> [аргументы]
+
+  setup                 Собрать образ, выбрать стратегию и запустить прокси
+  list                  Показать стратегии из zapret-discord-youtube
+  select [имя|номер]    Выбрать стратегию (без аргумента — интерактивно)
+                        Дополнительно: --youtube-fix или --no-youtube-fix
+  start | up            Запустить прокси
+  stop | down           Остановить прокси и убрать его firewall-правила
+  restart               Перезапустить прокси
+  status                Показать состояние контейнера и выбранный конфиг
+  logs [аргументы]      Показать логи (например: ./zls logs -f)
+  show                  Показать выбранную стратегию и её аргументы nfqws
+  validate [--all]      Проверить выбранную или все стратегии через --dry-run
+  test                  Проверить YouTube, googlevideo и Discord через прокси
+  build                 Пересобрать Docker-образ
+EOF
+}
+
+command=${1:-help}
+[[ $# -eq 0 ]] || shift
+if [[ "$command" == "help" || "$command" == "-h" || "$command" == "--help" ]]; then
+    usage
+    exit 0
+fi
+need_docker
+
+case "$command" in
+    setup)
+        "${COMPOSE[@]}" build
+        if ! has_selection || [[ $# -gt 0 ]]; then
+            run_ctl select "$@"
+        fi
+        "${COMPOSE[@]}" up -d
+        "${COMPOSE[@]}" ps
+        ;;
+    list|select|show|validate)
+        run_ctl "$command" "$@"
+        ;;
+    build)
+        "${COMPOSE[@]}" build "$@"
+        ;;
+    start|up)
+        has_selection || fail "Сначала выберите стратегию: ./zls select"
+        "${COMPOSE[@]}" up -d "$@"
+        ;;
+    stop|down)
+        "${COMPOSE[@]}" down "$@"
+        ;;
+    restart)
+        "${COMPOSE[@]}" restart "$@"
+        ;;
+    status)
+        "${COMPOSE[@]}" ps -a
+        if has_selection; then
+            run_ctl show
+        else
+            printf 'Стратегия ещё не выбрана.\n'
+        fi
+        ;;
+    logs)
+        "${COMPOSE[@]}" logs "$@"
+        ;;
+    test)
+        "${COMPOSE[@]}" exec -T proxy /opt/zls/test-proxy.sh "$@"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        usage >&2
+        fail "Неизвестная команда: $command"
+        ;;
+esac

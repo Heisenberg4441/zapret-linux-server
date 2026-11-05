@@ -1,0 +1,31 @@
+services:
+  proxy:
+    image: zapret-linux-server:latest
+    build:
+      context: ..
+      dockerfile: zapret-linux-server/Dockerfile
+    container_name: zapret-linux-server
+    network_mode: host
+    init: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    env_file:
+      - ./settings.env
+    volumes:
+      - ./config:/config
+      - ./lists:/config/lists:ro
+    restart: unless-stopped
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "/opt/zls/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
